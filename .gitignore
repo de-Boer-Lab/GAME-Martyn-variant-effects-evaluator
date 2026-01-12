@@ -1,0 +1,16 @@
+# Ignore the container since it is huge
+*.sif
+
+# macOS system files
+*.DS_Store
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Large predictions directories
+*_test
+*pred*
+
+# Tarballed directories for Zenodo
+*.tar.gz

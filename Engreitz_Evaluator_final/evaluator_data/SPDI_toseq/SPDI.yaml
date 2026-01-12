@@ -1,0 +1,13 @@
+name: r_SPDI
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - r-base
+  - r-dplyr
+  - r-tidyr
+  - r-stringr
+  - r-readr
+  - bioconductor-plyranges
+  - bioconductor-bsgenome.hsapiens.ncbi.grch38

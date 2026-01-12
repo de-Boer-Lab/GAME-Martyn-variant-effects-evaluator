@@ -1,0 +1,5 @@
+conda env create --name r_SPDI --file=SPDI.yml
+
+Rscript spdiToSequence_IL.R 1000 all_THP1.tsv all_THP1_sequences.tsv
+
+Rscript spdiToSequence_IL.R 1000 all_Jurkat.tsv all_Jurkat_sequences.tsv
