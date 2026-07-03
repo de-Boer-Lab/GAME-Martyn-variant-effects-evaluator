@@ -14,3 +14,6 @@ __pycache__/
 
 # Tarballed directories for Zenodo
 *.tar.gz
+
+# Ignore big CSV variant sequences files
+*.csv
