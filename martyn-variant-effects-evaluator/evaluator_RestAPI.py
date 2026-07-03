@@ -7,9 +7,9 @@ from requests.exceptions import RequestException, HTTPError
 
 import config
 from data_loader import create_json_from_tsv
-from evaluator_content_handler import *
-import evaluator_metrics_calculator
-from config import EVALUATOR_INPUT_PATH, EVALUATOR_NAME
+from evaluator_content_handler import negotiate_formats, get_predictions, deserialize_response
+from evaluator_metrics_calculator import calculate_and_save_metrics
+from config import EVALUATOR_INPUT_PATH
 
 def run_evaluator(predictor_ip, predictor_port, output_dir):
     """
@@ -24,13 +24,11 @@ def run_evaluator(predictor_ip, predictor_port, output_dir):
     
     # Communicate with Predictor, send request, receive predictions
     predictor_url = f"http://{predictor_ip}:{predictor_port}"
-    response_payload = None
-    is_success_response = False # Flag to track if we got a 200 OK
 
     #Decide the request format and response format
     req_fmt, resp_fmt = negotiate_formats(predictor_url)
     
-    # Send 2 seperate requests for the 2 different cell types in the Engritz data (THP1 and Jurkat)
+    # Send 2 separate requests for the 2 different cell types in the Martyn data (THP1 and Jurkat)
     # Constructed a mapping dict with cell_type:path names
     cell_type_map = {
         'THP-1 monocytes': 'THP1',
@@ -38,13 +36,17 @@ def run_evaluator(predictor_ip, predictor_port, output_dir):
     }
 
     for cell_type, path_name in cell_type_map.items():
+        
+        # CHANGE (v1): reset per-iteration so state from a previous cell type can't leak in
+        response_payload = None
+        is_success_response = False
 
         try:
-            # Load in JSON file from evalutor_data if connection to Predictor container was successful
+            # Load in JSON file from evaluator_data if connection to Predictor container was successful
             # Create JSON string from input file since it is not in JSON format already
             print(f"Currently parsing the following cell type: {cell_type}")
             # Create a version of the cell type string that is safe for file paths
-            file_path = f"{EVALUATOR_INPUT_PATH}/{path_name}/all_{path_name}_sequences.tsv"
+            file_path = f"{EVALUATOR_INPUT_PATH}/{path_name}/variant_sequences.csv"
             
             evaluator_json = create_json_from_tsv(file_path, cell_type)
             #Total number of sequences being sent to the Evaluator
@@ -54,6 +56,7 @@ def run_evaluator(predictor_ip, predictor_port, output_dir):
         except FileNotFoundError:
             print(f"ERROR: File not found. The script could not access the path: {file_path}")
             print("Please ensure this path and file exist.")
+            continue
 
         try:
             # This call will return a 200 OK response OR raise HTTPError (4xx/5xx)
@@ -89,14 +92,16 @@ def run_evaluator(predictor_ip, predictor_port, output_dir):
         
         # Save predictions
         predictor_name = response_payload.get("predictor_name", "UnknownPredictor").replace(" ", "_")
-        output_filename = f"{EVALUATOR_NAME}_{path_name}.json"
+        output_filename = f"{config.output_filename_base}_{path_name}_from_{predictor_name}.json"
         saved_predictions_path = os.path.join(output_dir, output_filename)
             
         # Check sequence counts before saving
-        for i, task in enumerate(response_payload.get("prediction_tasks", []), start=1):
-            preds = task.get("predictions", [])
+        for task_idx, task in enumerate(response_payload.get("prediction_tasks", []), start=1):
+            preds = task.get("predictions", {})
+            if "error" in preds:
+                continue
             if len(preds) != total_sequences:
-                print(f"Warning: Task {i} ('{task.get('name')}') has {len(preds)} predictions, but {total_sequences} sequences were sent to the Predictor.")
+                print(f"Warning: Task {task_idx} ('{task.get('name')}') has {len(preds)} predictions, but {total_sequences} sequences were sent to the Predictor.")
         
         try:
             with open(saved_predictions_path, 'w', encoding='utf-8') as f:
@@ -110,22 +115,24 @@ def run_evaluator(predictor_ip, predictor_port, output_dir):
         if is_success_response:
             all_lengths_match = True
             #Loop through and check all the prediction tasks
-            for i, task in enumerate(response_payload.get("prediction_tasks", []), start=1):
-                preds = task.get("predictions", [])
-                #If there is an error key in one of the predictions don't check length of predictions
+            for task_idx, task in enumerate(response_payload.get("prediction_tasks", []), start=1):
+                preds = task.get("predictions", {})
+                # if the task reports an error, skip the length check entirely
+                # (the original set the flag True but fell through to the length check, which
+                # then overwrote it to False).
                 if "error" in preds:
-                    all_lengths_match = True
+                    print(f"Task {task_idx} ('{task.get('name')}') returned an error -- skipping length check.")
+                    continue
                 #Otherwise length of predictions needs to == the # of sequences
                 if len(preds) != total_sequences:
-                    print(f"Warning: Task {i} ('{task.get('name')}') has {len(preds)} predictions, but {total_sequences} sequences were sent to the Predictor.")
+                    print(f"Warning: Task {task_idx} ('{task.get('name')}') has {len(preds)} predictions, but {total_sequences} sequences were sent to the Predictor.")
                     all_lengths_match = False
             if all_lengths_match:    
-                evaluator_metrics_calculator.calculate_and_save_metrics(path_name, saved_predictions_path, output_dir)
+                calculate_and_save_metrics(path_name, saved_predictions_path, output_dir)
             else:
                 print("Skipping metric calculation because not all sequences got predictions.")
         else:
             print("Skipping metrics calculation because the Predictor did not return a 200 OK status.")
-
        
 
 if __name__ == '__main__':

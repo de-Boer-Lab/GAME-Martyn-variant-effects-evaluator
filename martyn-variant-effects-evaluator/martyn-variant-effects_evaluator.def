@@ -1,0 +1,71 @@
+Bootstrap: docker
+From: python:3.13-slim
+Stage: build
+
+%files
+    config.py /opt/martyn_evaluator/config.py
+    data_loader.py /opt/martyn_evaluator/data_loader.py
+    evaluator_content_handler.py /opt/martyn_evaluator/evaluator_content_handler.py
+    evaluator_metrics_calculator.py /opt/martyn_evaluator/evaluator_metrics_calculator.py
+    evaluator_RestAPI.py /opt/martyn_evaluator/evaluator_RestAPI.py
+
+%environment
+     # Prevent automatic binding of host directories
+    export APPTAINER_NO_MOUNT="home,tmp,proc,sys,dev"
+    export LC_ALL=C
+    # Make the evaluator package importable regardless of the working directory
+    export PYTHONPATH="/opt/martyn_evaluator:$PYTHONPATH"
+    
+%post
+    # Install system packages and dependencies
+    echo "Installing system dependencies..."
+    apt-get update && \
+    apt-get install -y --no-install-recommends python3-pip bzip2 ca-certificates && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+    echo "Installing Python dependencies..."
+    python -m pip install --upgrade pip
+    python -m pip install --no-cache-dir numpy tqdm pandas msgpack scipy requests
+    
+    # Set permissions to access all directories
+    echo "Setting permissions for the evaluator scripts..."
+    chmod -R 755 /opt/martyn_evaluator
+
+%runscript
+    exec python3 /opt/martyn_evaluator/evaluator_RestAPI.py "$@"
+
+%startscript
+    exec python3 /opt/martyn_evaluator/evaluator_RestAPI.py "$@"
+
+%labels
+    Author "Ishika Luthra, Satyam Priyadarshi"
+    game_schema_version "1.0"
+    Description "This container is the Evaluator set up for Genomic API for Model Evaluation for Martyn et al. (2025) Variant Effects dataset."
+
+%help
+    Martyn Variant Effects evaluator (PPIF & IL2RA promoter/enhancer variant effects,
+    THP-1 and Jurkat). Sends one /predict request per cell type to a Predictor and writes a
+    single tab-separated summary: evaluation_summary_<evaluator_name>.csv.
+
+    The image contains ONLY the evaluator scripts. The input data is provided at runtime by
+    bind-mounting your evaluator_data directory to /evaluator_data, and predictions are written
+    to a mounted predictions directory. config.py auto-detects the container and reads /evaluator_data.
+
+    Build (from inside the evaluator directory):
+        ```
+        apptainer build martyn_evaluator.sif martyn_evaluator.def
+        ```
+
+    Run:
+        ```
+        apptainer run \
+          -B /abs/path/to/evaluator_data:/evaluator_data \
+          -B /abs/path/to/predictions:/predictions \
+          martyn_evaluator.sif PREDICTOR_HOST PREDICTOR_PORT /predictions
+        ```
+
+    Arguments:
+        1. `PREDICTOR_HOST` : IP address or hostname of the Predictor server.
+        2. `PREDICTOR_PORT` : Port the Predictor is listening on.
+        3. `/predictions` : Mounted path inside the container for predictions + summary CSV.
+

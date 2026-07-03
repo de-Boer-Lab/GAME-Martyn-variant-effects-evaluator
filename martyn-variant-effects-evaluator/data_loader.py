@@ -2,11 +2,10 @@
 
 import os
 import json
-import msgpack
 from collections import Counter
 import functools
 import pandas as pd
-from config import EVALUATOR_INPUT_PATH
+from config import reference_gene_sequence_path
 
 class DuplicateKeysError(ValueError):
     """Raised when duplicate keys are found in a JSON object."""
@@ -144,49 +143,75 @@ def create_json_from_tsv(path_to_file, cell_type):
         raise FileNotFoundError(f"Evaluator input file not found: {path_to_file}")
 
     try:
-        sequence_dataFrame = pd.read_csv(path_to_file, sep=' ', header=None)
-        sequence_dataFrame.columns = ['variant', 'reference', 'alternate']
+        sequence_dataFrame = pd.read_csv(path_to_file, sep='\t')
+        print(sequence_dataFrame.columns)
 
-        variant_counts = sequence_dataFrame['variant'].value_counts()
+        #print(sequence_dataFrame.groupby(['VariantID_h19']).filter(lambda x : (x['gene_symbol'].nunique()==x['gene_symbol'].count())&(x['gene_symbol'].nunique()>1)))
+        ref_genes = sequence_dataFrame["gene_symbol"].unique()
+
+        variant_counts = sequence_dataFrame['VariantID_h19'].value_counts()
         duplicates_with_counts = variant_counts[variant_counts > 1]
 
         print("Duplicated variants with counts:")
         print(duplicates_with_counts)   
     
-        sequence_dataFrame_no_duplicates = sequence_dataFrame.drop_duplicates(subset='variant')
-        print(sequence_dataFrame_no_duplicates.shape)
-        # Create a dictionary, mapping each sequence name to its corresponding sequence
-        variant_dict = {}
+        sequence_dataFrame_no_duplicates = sequence_dataFrame.drop_duplicates(subset='VariantID_h19')
+        
+        print("size of dataframe after dropping duplicates")
+        print(sequence_dataFrame_no_duplicates)
+        #Load reference gene sequence
+        reference_gene_sequences = pd.read_csv(reference_gene_sequence_path, sep=',')
+        #Only keep the gene that's needed for this cell line
+        reference_gene_sequences = reference_gene_sequences[reference_gene_sequences["gene"].isin(ref_genes)]
 
-        for _, row in sequence_dataFrame_no_duplicates.iterrows():
-            variant = row['variant']
-            variant_dict[f"{variant}_reference"] = row['reference']
-            variant_dict[f"{variant}_alternate"] = row['alternate']
+        sequence_dict = dict(zip(reference_gene_sequences["gene"], reference_gene_sequences["sequence"]))
 
+        variants_dict = dict(zip(sequence_dataFrame_no_duplicates["VariantID_h19"], sequence_dataFrame_no_duplicates["variant_sequence"]))
+        sequence_dict.update(variants_dict)
+        print(len(sequence_dict))
 
+        # Define the flanking range (1 million here)
+        flank = 1_000_000
+
+        # Create dictionary: key = gene, value = [start, end]
+        prediction_ranges = {
+            row['gene']: [flank, flank + row['gene_length']] 
+            for _, row in reference_gene_sequences.iterrows()
+        }
+
+        #Define Prediction ranges based on the gene
+        variant_ranges = {
+            row['VariantID_h19']: prediction_ranges[row['gene_symbol']]
+            for _, row in sequence_dataFrame_no_duplicates.iterrows()
+        }
+
+        prediction_ranges.update(variant_ranges)
+        print(len(prediction_ranges))
+        
         # Define the prediction tasks as a separate variable
-        prediction_tasks = [
-            {
-                "name": "engritz_" + cell_type,
+        prediction_tasks_str = f"""
+        [
+            {{
+                "name": "martyn_{cell_type}",
                 "type": "expression",
-                "cell_type": cell_type,
+                "cell_type": "{cell_type}",
                 "scale": "log",
                 "species": "homo_sapiens"
-            }
+            }}
         ]
+        """
+        prediction_tasks = check_duplicates_from_string(prediction_tasks_str)
         
         # Build the JSON evaluator object
         evaluator_dict = {
-            "request": "predict",
             "readout": "point",
             "prediction_tasks": prediction_tasks,
-            "sequences": variant_dict
+            "sequences": sequence_dict,
+            "prediction_ranges": prediction_ranges
         }
         
         # Convert the dictionary to a JSON string with indentation for readability
         json_string = json.dumps(evaluator_dict)
-        #Check for duplicate keys in the generated JSON string.
-        # Use the helper function that accepts a JSON string.
         jsonResult_dict = check_duplicates_from_string(json_string)
         return jsonResult_dict
     except (json.JSONDecodeError, 
