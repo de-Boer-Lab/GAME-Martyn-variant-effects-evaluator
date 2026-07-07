@@ -10,11 +10,18 @@ DNA to dissect and reprogram gene expression*, **Cell** 188(12):3349–3366 (202
 The Evaluator sends one prediction request per cell type to a Predictor, then reports the
 **Pearson correlation** between predicted and measured variant effects (log2fold-change).
 
+## Important Links
+
+- Main GAME Repository: [de-Boer-Lab/Genomic-API-for-Model-Evaluation](https://github.com/de-Boer-Lab/Genomic-API-for-Model-Evaluation)
+- GAME Documentation: [ReadTheDocs](https://genomic-api-for-model-evaluation-documentation.readthedocs.io)
+- Pre-built Evaluator container image and data: [Hugging Face](https://huggingface.co/datasets/deBoerLab/Martyn_VariantEffects_GAME/)
+- List of all [GAME Modules](https://github.com/de-Boer-Lab/GAME_modules)
+
 ---
 
 ## Quick start
 
-Download the container image and evaluator_data from here: https://huggingface.co/datasets/deBoerLab/Martyn_VariantEffects_GAME/
+Download the container image and evaluator_data from Hugging Face (see [Important Links](#important-links) above).
 
 ```bash
 apptainer run \
